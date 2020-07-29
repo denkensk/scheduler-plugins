@@ -23,6 +23,10 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	"k8s.io/kubernetes/pkg/scheduler/util"
+
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,6 +43,7 @@ type Coscheduling struct {
 	podLister       corelisters.PodLister
 	// key is <namespace>/<PodGroup name> and value is *PodGroupInfo.
 	podGroupInfos sync.Map
+	clock         util.Clock
 }
 
 // PodGroupInfo is a wrapper to a PodGroup with additional information.
@@ -57,9 +62,8 @@ type PodGroupInfo struct {
 	timestamp time.Time
 	// minAvailable is the minimum number of pods to be co-scheduled in a PodGroup.
 	// All pods in a PodGroup should have the same minAvailable.
-	minAvailable int
-	deleted      bool
-	deleteTime   time.Time
+	minAvailable      int
+	deletionTimestamp *time.Time
 }
 
 var _ framework.QueueSortPlugin = &Coscheduling{}
@@ -78,7 +82,9 @@ const (
 	// TODO make it configurable
 	PermitWaitingTime = 1 * time.Second
 	//
-	PodGroupGCInterval = 10 * time.Minute
+	PodGroupGCInterval = 30 * time.Second
+	//
+	PodGroupExpirationTime = 10 * time.Minute
 )
 
 // Name returns name of the plugin. It is used in logs, etc.
@@ -91,6 +97,7 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 	podLister := handle.SharedInformerFactory().Core().V1().Pods().Lister()
 	cs := &Coscheduling{frameworkHandle: handle,
 		podLister: podLister,
+		clock:     util.RealClock{},
 	}
 	podInformer := handle.SharedInformerFactory().Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(
@@ -113,8 +120,7 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 			},
 		},
 	)
-	//go podInformer.Run(nil)
-	go cs.podGroupInfoGC()
+	go wait.Until(cs.podGroupInfoGC, PodGroupGCInterval, nil)
 
 	return cs, nil
 }
@@ -162,8 +168,8 @@ func (cs *Coscheduling) getOrCreatePodGroupInfo(pod *v1.Pod, ts time.Time) (*Pod
 		value, exist := cs.podGroupInfos.Load(pgKey)
 		if exist {
 			pgInfo := value.(*PodGroupInfo)
-			if pgInfo.deleted {
-				pgInfo.deleted = false
+			if pgInfo.deletionTimestamp != nil {
+				pgInfo.deletionTimestamp = nil
 				cs.podGroupInfos.Store(pgKey, pgInfo)
 			}
 			return pgInfo, podMinAvailable
@@ -257,7 +263,7 @@ func (cs *Coscheduling) Permit(ctx context.Context, state *framework.CycleState,
 			waitingPod.Allow(cs.Name())
 		}
 	})
-	cs.deletePodGroupInfo(pod)
+	cs.cleanPodGroupInfoIfPresent(pod)
 
 	return framework.NewStatus(framework.Success, ""), 0
 }
@@ -341,31 +347,7 @@ func (cs *Coscheduling) calculateWaitingPods(podGroupName, namespace string) int
 }
 
 func (cs *Coscheduling) cleanPodGroupInfoIfPresent(obj interface{}) {
-	klog.Error("thread running ******* now")
-	var pod *v1.Pod
-	switch t := obj.(type) {
-	case *v1.Pod:
-		pod = t
-	case cache.DeletedFinalStateUnknown:
-		var ok bool
-		pod, ok = t.Obj.(*v1.Pod)
-		if !ok {
-			klog.Errorf("cannot convert to *v1.Pod: %v", t.Obj)
-			return
-		}
-	default:
-		klog.Errorf("cannot convert to *v1.Pod: %v", t)
-		return
-	}
-	cs.deletePodGroupInfo(pod)
-}
-
-// assignedPod selects pods that are assigned (scheduled and running).
-func assignedPod(pod *v1.Pod) bool {
-	return len(pod.Spec.NodeName) != 0
-}
-
-func (cs *Coscheduling) deletePodGroupInfo(pod *v1.Pod) {
+	pod := obj.(*v1.Pod)
 	podGroupName, podMinAvailable, _ := GetPodGroupLabels(pod)
 	if len(podGroupName) > 0 && podMinAvailable > 0 {
 		pgKey := fmt.Sprintf("%v/%v", pod.Namespace, podGroupName)
@@ -374,25 +356,29 @@ func (cs *Coscheduling) deletePodGroupInfo(pod *v1.Pod) {
 			value, exist := cs.podGroupInfos.Load(pgKey)
 			if exist {
 				pgInfo := value.(*PodGroupInfo)
-				if !pgInfo.deleted {
-					pgInfo.deleteTime = time.Now()
+				if pgInfo.deletionTimestamp != nil {
+					now := cs.clock.Now()
+					pgInfo.deletionTimestamp = &now
+					cs.podGroupInfos.Store(pgKey, pgInfo)
 				}
-				cs.podGroupInfos.Store(pgKey, pgInfo)
 			}
 		}
 	}
 }
 
+// assignedPod selects pods that are assigned (scheduled and running).
+func assignedPod(pod *v1.Pod) bool {
+	return len(pod.Spec.NodeName) != 0
+}
+
 func (cs *Coscheduling) podGroupInfoGC() {
-	for {
-		cs.podGroupInfos.Range(func(key, value interface{}) bool {
-			pgInfo := value.(*PodGroupInfo)
-			if pgInfo.deleted {
-				pgInfo.deleteTime.Add(PodGroupGCInterval).Before(time.Now())
-				cs.podGroupInfos.Delete(key)
-				klog.V(3).Infof("%v is out of date and has been deleted in PodGroup GC", key)
-			}
-			return true
-		})
-	}
+	klog.V(1).Info("GC *******")
+	cs.podGroupInfos.Range(func(key, value interface{}) bool {
+		pgInfo := value.(*PodGroupInfo)
+		if pgInfo.deletionTimestamp != nil && pgInfo.deletionTimestamp.Add(PodGroupExpirationTime).Before(time.Now()) {
+			klog.V(3).Infof("%v is out of date and has been deleted in PodGroup GC", key)
+			cs.podGroupInfos.Delete(key)
+		}
+		return true
+	})
 }
