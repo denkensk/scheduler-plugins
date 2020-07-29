@@ -26,7 +26,6 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/informers"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -93,9 +92,8 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 	cs := &Coscheduling{frameworkHandle: handle,
 		podLister: podLister,
 	}
-
-	podInformer := informers.NewSharedInformerFactory(handle.ClientSet(), 0).Core().V1().Pods()
-	podInformer.Informer().AddEventHandler(
+	podInformer := handle.SharedInformerFactory().Core().V1().Pods().Informer()
+	podInformer.AddEventHandler(
 		cache.FilteringResourceEventHandler{
 			FilterFunc: func(obj interface{}) bool {
 				switch t := obj.(type) {
@@ -115,6 +113,7 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 			},
 		},
 	)
+	//go podInformer.Run(nil)
 	go cs.podGroupInfoGC()
 
 	return cs, nil
