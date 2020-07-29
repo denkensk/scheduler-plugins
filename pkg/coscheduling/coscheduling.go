@@ -356,7 +356,7 @@ func (cs *Coscheduling) cleanPodGroupInfoIfPresent(obj interface{}) {
 			value, exist := cs.podGroupInfos.Load(pgKey)
 			if exist {
 				pgInfo := value.(*PodGroupInfo)
-				if pgInfo.deletionTimestamp != nil {
+				if pgInfo.deletionTimestamp == nil {
 					now := cs.clock.Now()
 					pgInfo.deletionTimestamp = &now
 					cs.podGroupInfos.Store(pgKey, pgInfo)
@@ -375,6 +375,7 @@ func (cs *Coscheduling) podGroupInfoGC() {
 	klog.V(1).Info("GC *******")
 	cs.podGroupInfos.Range(func(key, value interface{}) bool {
 		pgInfo := value.(*PodGroupInfo)
+		klog.V(1).Infof("PG **** %v", pgInfo.name, pgInfo.deletionTimestamp)
 		if pgInfo.deletionTimestamp != nil && pgInfo.deletionTimestamp.Add(PodGroupExpirationTime).Before(time.Now()) {
 			klog.V(3).Infof("%v is out of date and has been deleted in PodGroup GC", key)
 			cs.podGroupInfos.Delete(key)
