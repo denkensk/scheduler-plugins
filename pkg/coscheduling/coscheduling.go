@@ -115,7 +115,6 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 			},
 		},
 	)
-	go podInformer.Informer().Run(nil)
 	go cs.podGroupInfoGC()
 
 	return cs, nil
@@ -242,7 +241,7 @@ func (cs *Coscheduling) Permit(ctx context.Context, state *framework.CycleState,
 	minAvailable := pgInfo.minAvailable
 	bound := cs.calculateBoundPods(podGroupName, namespace)
 	waiting := cs.calculateWaitingPods(podGroupName, namespace)
-	current := bound + waiting + 1
+	current := bound + waiting
 
 	if current < minAvailable {
 		klog.V(3).Infof("The count of podGroup %v/%v/%v is not up to minAvailable(%d) in Permit: bound(%d), waiting(%d)",
