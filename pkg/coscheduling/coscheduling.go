@@ -23,11 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/client-go/informers"
-
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/informers"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -95,7 +94,7 @@ func New(_ *runtime.Unknown, handle framework.FrameworkHandle) (framework.Plugin
 		podLister: podLister,
 	}
 
-	podInformer := informers.NewSharedInformerFactory(handle.ClientSet(), 0).Core().V1().Nodes()
+	podInformer := informers.NewSharedInformerFactory(handle.ClientSet(), 0).Core().V1().Pods()
 	podInformer.Informer().AddEventHandler(
 		cache.FilteringResourceEventHandler{
 			FilterFunc: func(obj interface{}) bool {
@@ -344,6 +343,7 @@ func (cs *Coscheduling) calculateWaitingPods(podGroupName, namespace string) int
 }
 
 func (cs *Coscheduling) cleanPodGroupInfoIfPresent(obj interface{}) {
+	klog.Error("thread running ******* now")
 	var pod *v1.Pod
 	switch t := obj.(type) {
 	case *v1.Pod:
@@ -371,7 +371,7 @@ func (cs *Coscheduling) deletePodGroupInfo(pod *v1.Pod) {
 	podGroupName, podMinAvailable, _ := GetPodGroupLabels(pod)
 	if len(podGroupName) > 0 && podMinAvailable > 0 {
 		pgKey := fmt.Sprintf("%v/%v", pod.Namespace, podGroupName)
-		// If it is a PodGroup and present in PodGroupInfos, set it's deleted true.
+		// If it's a PodGroup and present in PodGroupInfos, set it's deleted true.
 		if len(pgKey) != 0 {
 			value, exist := cs.podGroupInfos.Load(pgKey)
 			if exist {
