@@ -82,9 +82,9 @@ const (
 	// TODO make it configurable
 	PermitWaitingTime = 1 * time.Second
 	//
-	PodGroupGCInterval = 30 * time.Second
+	PodGroupGCInterval = 5 * time.Second
 	//
-	PodGroupExpirationTime = 10 * time.Minute
+	PodGroupExpirationTime = 10 * time.Second
 )
 
 // Name returns name of the plugin. It is used in logs, etc.
