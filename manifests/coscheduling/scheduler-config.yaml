@@ -3,7 +3,7 @@ kind: KubeSchedulerConfiguration
 leaderElection:
   leaderElect: false
 clientConnection:
-  kubeconfig: "REPLACE_ME_WITH_KUBE_CONFIG_PATH"
+  kubeconfig: scheduler.conf
 profiles:
 - schedulerName: default-scheduler
   plugins:
