@@ -3,6 +3,7 @@ module sigs.k8s.io/scheduler-plugins
 go 1.13
 
 require (
+	github.com/pkg/errors v0.8.1
 	k8s.io/api v0.18.0
 	k8s.io/apimachinery v0.18.0
 	k8s.io/client-go v0.18.0
