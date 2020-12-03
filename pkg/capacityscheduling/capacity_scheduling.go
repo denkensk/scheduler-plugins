@@ -186,13 +186,17 @@ func New(obj runtime.Object, handle framework.FrameworkHandle) (framework.Plugin
 // 2. Check if the sum(eq's usage) > sum(eq's min).
 func (c *CapacityScheduling) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) *framework.Status {
 	snapshotElasticQuota := c.snapshotElasticQuota()
+	preFilterState := computePodResourceRequest(pod)
+
+	state.Write(preFilterStateKey, preFilterState)
+	state.Write(ElasticQuotaSnapshotKey, snapshotElasticQuota)
+
 	elasticQuotaInfos := snapshotElasticQuota.elasticQuotaInfos
 	eq := snapshotElasticQuota.elasticQuotaInfos[pod.Namespace]
 	if eq == nil {
 		return framework.NewStatus(framework.Success, "skipCapacityScheduling")
 	}
 
-	preFilterState := computePodResourceRequest(pod)
 	if eq.overUsed(preFilterState.Resource, eq.Max, resourceAdd) {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because ElasticQuota %v is more than Max", pod.Namespace, pod.Name, eq.Namespace))
 	}
@@ -200,9 +204,7 @@ func (c *CapacityScheduling) PreFilter(ctx context.Context, state *framework.Cyc
 	if elasticQuotaInfos.totalUsedMoreThanTotalMin() {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because total ElasticQuota used is more than min", pod.Namespace, pod.Name))
 	}
-	klog.Infof("after %v", elasticQuotaInfos["ns1"].Used)
-	state.Write(preFilterStateKey, preFilterState)
-	state.Write(ElasticQuotaSnapshotKey, snapshotElasticQuota)
+
 	return framework.NewStatus(framework.Success, "")
 }
 
@@ -219,9 +221,14 @@ func (c *CapacityScheduling) AddPod(ctx context.Context, cycleState *framework.C
 		return framework.NewStatus(framework.Error, err.Error())
 	}
 
-	request := computePodResourceRequest(podToAdd)
 	elasticQuotaInfo := elasticQuotaSnapshotState.elasticQuotaInfos[podToAdd.Namespace]
-	elasticQuotaInfo.reserveResource(request.Resource)
+	if elasticQuotaInfo != nil {
+		klog.Infof("%v, %v", elasticQuotaInfo.Namespace, elasticQuotaInfo.pods)
+		err := elasticQuotaInfo.addPodIfNotPresent(podToAdd)
+		if err != nil {
+			klog.Errorf("ElasticQuota addPodIfNotPresent for pod %v/%v error %v", podToAdd.Namespace, podToAdd.Name, err)
+		}
+	}
 
 	return framework.NewStatus(framework.Success, "")
 }
@@ -464,6 +471,8 @@ func selectVictimsOnNode(
 		moreThanMinWithPreemptor = preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Min, resourceAdd)
 	}
 
+	// sort the pods in node by the priority class
+	sort.Slice(nodeInfo.Pods, func(i, j int) bool { return !util.MoreImportantPod(nodeInfo.Pods[i].Pod, nodeInfo.Pods[j].Pod) })
 	for _, p := range nodeInfo.Pods {
 		pElasticQuotaInfo, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
 		// Preemption only happens between in the same type of namespace: with or without.
@@ -490,9 +499,7 @@ func selectVictimsOnNode(
 						// will be chosen from Quotas that allocates more resources
 						// than its min, i.e., borrowing resources from other
 						// Quotas.
-						preemptorRequest := computePodResourceRequest(pod)
-						if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) &&
-							!pElasticQuotaInfo.underUsed(preemptorRequest.Resource, pElasticQuotaInfo.Min, resourceDelete) {
+						if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) {
 							potentialVictims = append(potentialVictims, p.Pod)
 							if err := removePod(p.Pod); err != nil {
 								return nil, 0, false
@@ -591,6 +598,7 @@ func (c *CapacityScheduling) updateElasticQuota(oldObj, newObj interface{}) {
 
 	oldElasticQuotaInfo := c.elasticQuotaInfos[oldEQ.Namespace]
 	if oldElasticQuotaInfo != nil {
+		newElasticQuotaInfo.pods = oldElasticQuotaInfo.pods
 		newElasticQuotaInfo.Used = oldElasticQuotaInfo.Used
 	}
 	c.elasticQuotaInfos[newEQ.Namespace] = newElasticQuotaInfo

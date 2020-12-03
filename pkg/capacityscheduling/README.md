@@ -41,6 +41,25 @@ profiles:
     args:
       kubeConfigPath: "REPLACE_ME_WITH_KUBE_CONFIG_PATH"
 ```
+### ElasticQuota
+```yaml
+apiVersion: scheduling.sigs.k8s.io/v1alpha1
+kind: ElasticQuota
+metadata:
+  name: quota1
+  namespace: quota1
+spec:
+  max:
+    cpu: 6
+  min:
+    cpu: 4
+```
+
+- max: the upper bound of the resource consumption of the consumers.
+- min: the minimum resources that are guaranteed to ensure the basic functionality/performance of the consumers
+
+
+
 
 ### Demo
 We assume two elastic quotas are defined: quota1 (min:`cpu 4`, max:`cpu 6`) and quota2 

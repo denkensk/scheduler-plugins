@@ -124,6 +124,7 @@ func (e *ElasticQuotaInfo) underUsed(podRequest framework.Resource, resource *fr
 func (e *ElasticQuotaInfo) clone() *ElasticQuotaInfo {
 	newElasticQuotaInfo := &ElasticQuotaInfo{
 		Namespace: e.Namespace,
+		pods:      sets.NewString(),
 	}
 
 	if e.Min != nil {
@@ -134,6 +135,12 @@ func (e *ElasticQuotaInfo) clone() *ElasticQuotaInfo {
 	}
 	if e.Used != nil {
 		newElasticQuotaInfo.Used = e.Used.Clone()
+	}
+	if len(e.pods) > 0 {
+		pods := e.pods.List()
+		for _, pod := range pods {
+			newElasticQuotaInfo.pods.Insert(pod)
+		}
 	}
 
 	return newElasticQuotaInfo
