@@ -91,7 +91,7 @@ func TestPreFilter(t *testing.T) {
 			name: "pod belongs ElasticQuota",
 			podInfos: []podInfo{
 				{podName: "ns1-p1", podNamespace: "ns1", memReq: 500},
-				{podName: "ns1-p2", podNamespace: "ns1", memReq: 1500},
+				{podName: "ns1-p2", podNamespace: "ns1", memReq: 1800},
 			},
 			elasticQuotas: map[string]*ElasticQuotaInfo{
 				"ns1": {
@@ -103,13 +103,13 @@ func TestPreFilter(t *testing.T) {
 						Memory: 2000,
 					},
 					Used: &framework.Resource{
-						Memory: 800,
+						Memory: 300,
 					},
 				},
 			},
 			expected: []framework.Code{
 				framework.Success,
-				framework.UnschedulableAndUnresolvable,
+				framework.Unschedulable,
 			},
 		},
 	}
@@ -128,7 +128,7 @@ func TestPreFilter(t *testing.T) {
 			state := framework.NewCycleState()
 			for i := range pods {
 				if got := cs.PreFilter(nil, state, pods[i]); got.Code() != tt.expected[i] {
-					t.Errorf("expected %v, got %v", tt.expected, got.Code())
+					t.Errorf("expected %v, got %v : %v", tt.expected[i], got.Code(), got.Message())
 				}
 			}
 		})

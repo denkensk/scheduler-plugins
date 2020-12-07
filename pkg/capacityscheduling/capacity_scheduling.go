@@ -198,11 +198,11 @@ func (c *CapacityScheduling) PreFilter(ctx context.Context, state *framework.Cyc
 	}
 
 	if eq.overUsed(preFilterState.Resource, eq.Max, resourceAdd) {
-		return framework.NewStatus(framework.UnschedulableAndUnresolvable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because ElasticQuota %v is more than Max", pod.Namespace, pod.Name, eq.Namespace))
+		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because ElasticQuota %v is more than Max", pod.Namespace, pod.Name, eq.Namespace))
 	}
 
-	if elasticQuotaInfos.totalUsedMoreThanTotalMin() {
-		return framework.NewStatus(framework.UnschedulableAndUnresolvable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because total ElasticQuota used is more than min", pod.Namespace, pod.Name))
+	if elasticQuotaInfos.totalUsedMoreThanTotalMinWithPod(preFilterState.Resource) {
+		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because total ElasticQuota used is more than min", pod.Namespace, pod.Name))
 	}
 
 	return framework.NewStatus(framework.Success, "")
@@ -473,50 +473,68 @@ func selectVictimsOnNode(
 
 	// sort the pods in node by the priority class
 	sort.Slice(nodeInfo.Pods, func(i, j int) bool { return !util.MoreImportantPod(nodeInfo.Pods[i].Pod, nodeInfo.Pods[j].Pod) })
-	for _, p := range nodeInfo.Pods {
-		pElasticQuotaInfo, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
-		// Preemption only happens between in the same type of namespace: with or without.
-		if preemptorWithElasticQuota == pWithElasticQuota {
-			// If there is elastic quota in the preemptor's namespace.
-			if preemptorWithElasticQuota {
-				if moreThanMinWithPreemptor {
-					// If Preemptor.Request + Quota.Used > Quota.Min:
-					// It means that its guaranteed isn't borrowed by other
-					// quotas. So that we will select the pods belongs to the
-					// same quota(namespace) with the lower priority than the
-					// preemptor’s priority as potential victims in a node.
-					if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
-						potentialVictims = append(potentialVictims, p.Pod)
-						if err := removePod(p.Pod); err != nil {
-							return nil, 0, false
-						}
-					}
-				} else {
-					if p.Pod.Namespace != pod.Namespace {
-						// If Preemptor.Request + Quota.allocated <= Quota.min: It
-						// means that its min or guaranteed resource is used or
-						// `borrowed` by other Quota. Potential victims in a node
-						// will be chosen from Quotas that allocates more resources
-						// than its min, i.e., borrowing resources from other
-						// Quotas.
-						if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) {
-							potentialVictims = append(potentialVictims, p.Pod)
-							if err := removePod(p.Pod); err != nil {
-								return nil, 0, false
-							}
-						}
-					}
+
+	if preemptorWithElasticQuota {
+		var sameEQLowPriorityPods []*v1.Pod
+		var otherEQMoreThanMinPods []*v1.Pod
+		for _, p := range nodeInfo.Pods {
+			pElasticQuotaInfo, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+			if !pWithElasticQuota {
+				continue
+			}
+
+			if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
+				sameEQLowPriorityPods = append(sameEQLowPriorityPods, p.Pod)
+			}
+
+			if p.Pod.Namespace != pod.Namespace {
+				if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) {
+					otherEQMoreThanMinPods = append(otherEQMoreThanMinPods, p.Pod)
 				}
-			} else {
-				if podutil.GetPodPriority(p.Pod) < podPriority {
-					potentialVictims = append(potentialVictims, p.Pod)
-					if err := removePod(p.Pod); err != nil {
-						return nil, 0, false
-					}
+			}
+		}
+		if moreThanMinWithPreemptor {
+			// If Preemptor.Request + Quota.Used > Quota.Min:
+			// It means that its guaranteed isn't borrowed by other
+			// quotas. So that we will select the pods belongs to the
+			// same quota(namespace) with the lower priority than the
+			// preemptor’s priority as potential victims in a node.
+			potentialVictims = sameEQLowPriorityPods
+		} else {
+			// If Preemptor.Request + Quota.allocated <= Quota.min: It
+			// means that its min or guaranteed resource is used or
+			// `borrowed` by other Quota. Potential victims in a node
+			// will be chosen from Quotas that allocates more resources
+			// than its min, i.e., borrowing resources from other
+			// Quotas.
+			potentialVictims = otherEQMoreThanMinPods
+
+			// If potential victims is zero. We will select potential victims from the same namespace.
+			if len(potentialVictims) == 0 {
+				potentialVictims = sameEQLowPriorityPods
+			}
+		}
+
+		for _, p := range potentialVictims {
+			if err := removePod(p); err != nil {
+				return nil, 0, false
+			}
+		}
+	} else {
+		for _, p := range nodeInfo.Pods {
+			_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+			if pWithElasticQuota {
+				continue
+			}
+			if podutil.GetPodPriority(p.Pod) < podPriority {
+				potentialVictims = append(potentialVictims, p.Pod)
+				if err := removePod(p.Pod); err != nil {
+					return nil, 0, false
 				}
 			}
 		}
 	}
+
 	// No potential victims are found, and so we don't need to evaluate the node again since its state didn't change.
 	if len(potentialVictims) == 0 {
 		return nil, 0, false
@@ -591,17 +609,17 @@ func (c *CapacityScheduling) addElasticQuota(obj interface{}) {
 func (c *CapacityScheduling) updateElasticQuota(oldObj, newObj interface{}) {
 	oldEQ := oldObj.(*v1alpha1.ElasticQuota)
 	newEQ := newObj.(*v1alpha1.ElasticQuota)
-	newElasticQuotaInfo := newElasticQuotaInfo(newEQ.Namespace, newEQ.Spec.Min, newEQ.Spec.Max, nil)
+	newEQInfo := newElasticQuotaInfo(newEQ.Namespace, newEQ.Spec.Min, newEQ.Spec.Max, nil)
 
 	c.Lock()
 	defer c.Unlock()
 
-	oldElasticQuotaInfo := c.elasticQuotaInfos[oldEQ.Namespace]
-	if oldElasticQuotaInfo != nil {
-		newElasticQuotaInfo.pods = oldElasticQuotaInfo.pods
-		newElasticQuotaInfo.Used = oldElasticQuotaInfo.Used
+	oldEQInfo := c.elasticQuotaInfos[oldEQ.Namespace]
+	if oldEQInfo != nil {
+		newEQInfo.pods = oldEQInfo.pods
+		newEQInfo.Used = oldEQInfo.Used
 	}
-	c.elasticQuotaInfos[newEQ.Namespace] = newElasticQuotaInfo
+	c.elasticQuotaInfos[newEQ.Namespace] = newEQInfo
 }
 
 func (c *CapacityScheduling) deleteElasticQuota(obj interface{}) {

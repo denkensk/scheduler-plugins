@@ -36,7 +36,7 @@ func (e ElasticQuotaInfos) clone() ElasticQuotaInfos {
 	return elasticQuotas
 }
 
-func (e ElasticQuotaInfos) totalUsedMoreThanTotalMin() bool {
+func (e ElasticQuotaInfos) totalUsedMoreThanTotalMinWithPod(podRequest framework.Resource) bool {
 	used := framework.NewResource(nil)
 	min := framework.NewResource(nil)
 
@@ -44,6 +44,8 @@ func (e ElasticQuotaInfos) totalUsedMoreThanTotalMin() bool {
 		used.Add(elasticQuotaInfo.Used.ResourceList())
 		min.Add(elasticQuotaInfo.Min.ResourceList())
 	}
+
+	used.Add(podRequest.ResourceList())
 	if moreThanMin(*used, *min) {
 		return true
 	}
@@ -102,23 +104,6 @@ func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *fra
 	}
 
 	return false
-}
-
-func (e *ElasticQuotaInfo) underUsed(podRequest framework.Resource, resource *framework.Resource, fn func(x, y int64) int64) bool {
-	if fn(e.Used.MilliCPU, podRequest.MilliCPU) >= resource.MilliCPU {
-		return false
-	}
-	if fn(e.Used.Memory, podRequest.Memory) >= resource.Memory {
-		return false
-	}
-
-	for rName, rQuant := range podRequest.ScalarResources {
-		if fn(rQuant, e.Used.ScalarResources[rName]) >= resource.ScalarResources[rName] {
-			return false
-		}
-	}
-
-	return true
 }
 
 func (e *ElasticQuotaInfo) clone() *ElasticQuotaInfo {
