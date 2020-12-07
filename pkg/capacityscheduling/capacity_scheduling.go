@@ -475,49 +475,56 @@ func selectVictimsOnNode(
 	sort.Slice(nodeInfo.Pods, func(i, j int) bool { return !util.MoreImportantPod(nodeInfo.Pods[i].Pod, nodeInfo.Pods[j].Pod) })
 
 	if preemptorWithElasticQuota {
-		var sameEQLowPriorityPods []*v1.Pod
-		var otherEQMoreThanMinPods []*v1.Pod
 		for _, p := range nodeInfo.Pods {
 			pElasticQuotaInfo, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
 			if !pWithElasticQuota {
 				continue
 			}
 
-			if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
-				sameEQLowPriorityPods = append(sameEQLowPriorityPods, p.Pod)
-			}
+			if moreThanMinWithPreemptor {
+				// If Preemptor.Request + Quota.Used > Quota.Min:
+				// It means that its guaranteed isn't borrowed by other
+				// quotas. So that we will select the pods belongs to the
+				// same quota(namespace) with the lower priority than the
+				// preemptor’s priority as potential victims in a node.
+				if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
+					potentialVictims = append(potentialVictims, p.Pod)
+					if err := removePod(p.Pod); err != nil {
+						return nil, 0, false
+					}
+				}
 
-			if p.Pod.Namespace != pod.Namespace {
-				if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) {
-					otherEQMoreThanMinPods = append(otherEQMoreThanMinPods, p.Pod)
+			} else {
+				// If Preemptor.Request + Quota.allocated <= Quota.min: It
+				// means that its min or guaranteed resource is used or
+				// `borrowed` by other Quota. Potential victims in a node
+				// will be chosen from Quotas that allocates more resources
+				// than its min, i.e., borrowing resources from other
+				// Quotas.
+				if p.Pod.Namespace != pod.Namespace {
+					if moreThanMin(*pElasticQuotaInfo.Used, *pElasticQuotaInfo.Min) {
+						potentialVictims = append(potentialVictims, p.Pod)
+						if err := removePod(p.Pod); err != nil {
+							return nil, 0, false
+						}
+					}
 				}
 			}
-		}
-		if moreThanMinWithPreemptor {
-			// If Preemptor.Request + Quota.Used > Quota.Min:
-			// It means that its guaranteed isn't borrowed by other
-			// quotas. So that we will select the pods belongs to the
-			// same quota(namespace) with the lower priority than the
-			// preemptor’s priority as potential victims in a node.
-			potentialVictims = sameEQLowPriorityPods
-		} else {
-			// If Preemptor.Request + Quota.allocated <= Quota.min: It
-			// means that its min or guaranteed resource is used or
-			// `borrowed` by other Quota. Potential victims in a node
-			// will be chosen from Quotas that allocates more resources
-			// than its min, i.e., borrowing resources from other
-			// Quotas.
-			potentialVictims = otherEQMoreThanMinPods
 
-			// If potential victims is zero. We will select potential victims from the same namespace.
-			if len(potentialVictims) == 0 {
-				potentialVictims = sameEQLowPriorityPods
-			}
-		}
-
-		for _, p := range potentialVictims {
-			if err := removePod(p); err != nil {
-				return nil, 0, false
+			// If potential victims is zero . We will select potential victims from the same namespace again.
+			if !moreThanMinWithPreemptor && len(potentialVictims) == 0 {
+				for _, p := range nodeInfo.Pods {
+					_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+					if !pWithElasticQuota {
+						continue
+					}
+					if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
+						potentialVictims = append(potentialVictims, p.Pod)
+						if err := removePod(p.Pod); err != nil {
+							return nil, 0, false
+						}
+					}
+				}
 			}
 		}
 	} else {
