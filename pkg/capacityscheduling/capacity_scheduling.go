@@ -152,7 +152,7 @@ func New(obj runtime.Object, handle framework.FrameworkHandle) (framework.Plugin
 
 	schedSharedInformerFactory.Start(nil)
 	if !cache.WaitForCacheSync(nil, elasticQuotaInformer.HasSynced) {
-		return nil, fmt.Errorf("Timed out waiting for caches to sync %v", Name)
+		return nil, fmt.Errorf("timed out waiting for caches to sync %v", Name)
 	}
 
 	podInformer := handle.SharedInformerFactory().Core().V1().Pods().Informer()
@@ -182,7 +182,7 @@ func New(obj runtime.Object, handle framework.FrameworkHandle) (framework.Plugin
 }
 
 // PreFilter performs the following validations.
-// 1. Check if the (Pod.request + Quota.Allocated) is less than Quota.Max.
+// 1. Check if the (pod.request + eq.allocated) is less than eq.max.
 // 2. Check if the sum(eq's usage) > sum(eq's min).
 func (c *CapacityScheduling) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) *framework.Status {
 	snapshotElasticQuota := c.snapshotElasticQuota()
