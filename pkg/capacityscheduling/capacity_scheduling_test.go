@@ -210,7 +210,7 @@ func TestFindCandidates(t *testing.T) {
 						Memory: 200,
 					},
 					Min: &framework.Resource{
-						Memory: 100,
+						Memory: 150,
 					},
 					Used: &framework.Resource{
 						Memory: 50,

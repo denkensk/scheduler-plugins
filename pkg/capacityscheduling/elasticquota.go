@@ -36,7 +36,7 @@ func (e ElasticQuotaInfos) clone() ElasticQuotaInfos {
 	return elasticQuotas
 }
 
-func (e ElasticQuotaInfos) totalUsedMoreThanTotalMinWithPod(podRequest framework.Resource) bool {
+func (e ElasticQuotaInfos) aggregatedMinOverUsedWithPod(podRequest framework.Resource) bool {
 	used := framework.NewResource(nil)
 	min := framework.NewResource(nil)
 
@@ -46,10 +46,7 @@ func (e ElasticQuotaInfos) totalUsedMoreThanTotalMinWithPod(podRequest framework
 	}
 
 	used.Add(podRequest.ResourceList())
-	if moreThanMin(*used, *min) {
-		return true
-	}
-	return false
+	return moreThanMin(*used, *min)
 }
 
 // ElasticQuotaInfo is a wrapper to a ElasticQuota with information.
@@ -89,16 +86,16 @@ func (e *ElasticQuotaInfo) unreserveResource(request framework.Resource) {
 	}
 }
 
-func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *framework.Resource, fn func(x, y int64) int64) bool {
-	if fn(e.Used.MilliCPU, podRequest.MilliCPU) > resource.MilliCPU {
+func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *framework.Resource) bool {
+	if e.Used.MilliCPU+podRequest.MilliCPU > resource.MilliCPU {
 		return true
 	}
-	if fn(e.Used.Memory, podRequest.Memory) > resource.Memory {
+	if e.Used.Memory+podRequest.Memory > resource.Memory {
 		return true
 	}
 
 	for rName, rQuant := range podRequest.ScalarResources {
-		if fn(rQuant, e.Used.ScalarResources[rName]) > resource.ScalarResources[rName] {
+		if rQuant+e.Used.ScalarResources[rName] > resource.ScalarResources[rName] {
 			return true
 		}
 	}
@@ -107,28 +104,28 @@ func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *fra
 }
 
 func (e *ElasticQuotaInfo) clone() *ElasticQuotaInfo {
-	newElasticQuotaInfo := &ElasticQuotaInfo{
+	newEQInfo := &ElasticQuotaInfo{
 		Namespace: e.Namespace,
 		pods:      sets.NewString(),
 	}
 
 	if e.Min != nil {
-		newElasticQuotaInfo.Min = e.Min.Clone()
+		newEQInfo.Min = e.Min.Clone()
 	}
 	if e.Max != nil {
-		newElasticQuotaInfo.Max = e.Max.Clone()
+		newEQInfo.Max = e.Max.Clone()
 	}
 	if e.Used != nil {
-		newElasticQuotaInfo.Used = e.Used.Clone()
+		newEQInfo.Used = e.Used.Clone()
 	}
 	if len(e.pods) > 0 {
 		pods := e.pods.List()
 		for _, pod := range pods {
-			newElasticQuotaInfo.pods.Insert(pod)
+			newEQInfo.pods.Insert(pod)
 		}
 	}
 
-	return newElasticQuotaInfo
+	return newEQInfo
 }
 
 func (e *ElasticQuotaInfo) addPodIfNotPresent(pod *v1.Pod) error {

@@ -197,11 +197,11 @@ func (c *CapacityScheduling) PreFilter(ctx context.Context, state *framework.Cyc
 		return framework.NewStatus(framework.Success, "skipCapacityScheduling")
 	}
 
-	if eq.overUsed(preFilterState.Resource, eq.Max, resourceAdd) {
+	if eq.overUsed(preFilterState.Resource, eq.Max) {
 		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because ElasticQuota %v is more than Max", pod.Namespace, pod.Name, eq.Namespace))
 	}
 
-	if elasticQuotaInfos.totalUsedMoreThanTotalMinWithPod(preFilterState.Resource) {
+	if elasticQuotaInfos.aggregatedMinOverUsedWithPod(preFilterState.Resource) {
 		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("Pod %v/%v is rejected in Prefilter because total ElasticQuota used is more than min", pod.Namespace, pod.Name))
 	}
 
@@ -468,7 +468,7 @@ func selectVictimsOnNode(
 
 	// Check if there is elastic quota in the preemptor's namespace.
 	if preemptorWithElasticQuota {
-		moreThanMinWithPreemptor = preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Min, resourceAdd)
+		moreThanMinWithPreemptor = preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Min)
 	}
 
 	// sort the pods in node by the priority class
@@ -510,19 +510,18 @@ func selectVictimsOnNode(
 					}
 				}
 			}
-
-			// If potential victims is zero . We will select potential victims from the same namespace again.
-			if !moreThanMinWithPreemptor && len(potentialVictims) == 0 {
-				for _, p := range nodeInfo.Pods {
-					_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
-					if !pWithElasticQuota {
-						continue
-					}
-					if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
-						potentialVictims = append(potentialVictims, p.Pod)
-						if err := removePod(p.Pod); err != nil {
-							return nil, 0, false
-						}
+		}
+		// If potential victims is zero . We will select potential victims from the same namespace again.
+		if !moreThanMinWithPreemptor && len(potentialVictims) == 0 {
+			for _, p := range nodeInfo.Pods {
+				_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+				if !pWithElasticQuota {
+					continue
+				}
+				if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
+					potentialVictims = append(potentialVictims, p.Pod)
+					if err := removePod(p.Pod); err != nil {
+						return nil, 0, false
 					}
 				}
 			}
