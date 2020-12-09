@@ -160,6 +160,9 @@ func TestFindCandidates(t *testing.T) {
 			elasticQuotas: map[string]*ElasticQuotaInfo{
 				"ns1": {
 					Namespace: "ns1",
+					Max: &framework.Resource{
+						Memory: 200,
+					},
 					Min: &framework.Resource{
 						Memory: 50,
 					},
@@ -169,8 +172,11 @@ func TestFindCandidates(t *testing.T) {
 				},
 				"ns2": {
 					Namespace: "ns2",
+					Max: &framework.Resource{
+						Memory: 200,
+					},
 					Min: &framework.Resource{
-						Memory: 100,
+						Memory: 200,
 					},
 					Used: &framework.Resource{
 						Memory: 100,

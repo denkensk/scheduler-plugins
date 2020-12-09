@@ -223,7 +223,6 @@ func (c *CapacityScheduling) AddPod(ctx context.Context, cycleState *framework.C
 
 	elasticQuotaInfo := elasticQuotaSnapshotState.elasticQuotaInfos[podToAdd.Namespace]
 	if elasticQuotaInfo != nil {
-		klog.Infof("%v, %v", elasticQuotaInfo.Namespace, elasticQuotaInfo.pods)
 		err := elasticQuotaInfo.addPodIfNotPresent(podToAdd)
 		if err != nil {
 			klog.Errorf("ElasticQuota addPodIfNotPresent for pod %v/%v error %v", podToAdd.Namespace, podToAdd.Name, err)
@@ -463,9 +462,9 @@ func selectVictimsOnNode(
 		return nil
 	}
 
+	elasticQuotaInfos := elasticQuotaSnapshotState.elasticQuotaInfos
 	podPriority := podutil.GetPodPriority(pod)
-	preemptorElasticQuotaInfo, preemptorWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[pod.Namespace]
-
+	preemptorElasticQuotaInfo, preemptorWithElasticQuota := elasticQuotaInfos[pod.Namespace]
 	// Check if there is elastic quota in the preemptor's namespace.
 	if preemptorWithElasticQuota {
 		moreThanMinWithPreemptor = preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Min)
@@ -476,7 +475,7 @@ func selectVictimsOnNode(
 
 	if preemptorWithElasticQuota {
 		for _, p := range nodeInfo.Pods {
-			pElasticQuotaInfo, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+			pElasticQuotaInfo, pWithElasticQuota := elasticQuotaInfos[p.Pod.Namespace]
 			if !pWithElasticQuota {
 				continue
 			}
@@ -511,24 +510,9 @@ func selectVictimsOnNode(
 				}
 			}
 		}
-		// If potential victims is zero . We will select potential victims from the same namespace again.
-		if !moreThanMinWithPreemptor && len(potentialVictims) == 0 {
-			for _, p := range nodeInfo.Pods {
-				_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
-				if !pWithElasticQuota {
-					continue
-				}
-				if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
-					potentialVictims = append(potentialVictims, p.Pod)
-					if err := removePod(p.Pod); err != nil {
-						return nil, 0, false
-					}
-				}
-			}
-		}
 	} else {
 		for _, p := range nodeInfo.Pods {
-			_, pWithElasticQuota := elasticQuotaSnapshotState.elasticQuotaInfos[p.Pod.Namespace]
+			_, pWithElasticQuota := elasticQuotaInfos[p.Pod.Namespace]
 			if pWithElasticQuota {
 				continue
 			}
@@ -559,6 +543,14 @@ func selectVictimsOnNode(
 
 		return nil, 0, false
 	}
+
+	// If the quota.used + pod.request > quota.max or sum(quotas.used) + pod.request > sum(quotas.min)
+	// after removing all the lower priority pods,
+	// we are almost done and this node is not suitable for preemption.
+	if preemptorWithElasticQuota && (preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Max) || elasticQuotaInfos.aggregatedMinOverUsedWithPod(preFilterState.Resource)) {
+		return nil, 0, false
+	}
+
 	var victims []*v1.Pod
 	numViolatingVictim := 0
 	sort.Slice(potentialVictims, func(i, j int) bool { return util.MoreImportantPod(potentialVictims[i], potentialVictims[j]) })
@@ -578,6 +570,15 @@ func selectVictimsOnNode(
 			victims = append(victims, p)
 			klog.V(5).Infof("Pod %v/%v is a potential preemption victim on node %v.", p.Namespace, p.Name, nodeInfo.Node().Name)
 		}
+
+		if preemptorWithElasticQuota && (preemptorElasticQuotaInfo.overUsed(preFilterState.Resource, preemptorElasticQuotaInfo.Max) || elasticQuotaInfos.aggregatedMinOverUsedWithPod(preFilterState.Resource)) {
+			if err := removePod(p); err != nil {
+				return false, err
+			}
+			victims = append(victims, p)
+			klog.V(5).Infof("Pod %v/%v is a potential preemption victim on node %v.", p.Namespace, p.Name, nodeInfo.Node().Name)
+		}
+
 		return fits, nil
 	}
 	for _, p := range violatingVictims {

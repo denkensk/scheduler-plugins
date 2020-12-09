@@ -90,6 +90,7 @@ func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *fra
 	if e.Used.MilliCPU+podRequest.MilliCPU > resource.MilliCPU {
 		return true
 	}
+
 	if e.Used.Memory+podRequest.Memory > resource.Memory {
 		return true
 	}
@@ -99,7 +100,6 @@ func (e *ElasticQuotaInfo) overUsed(podRequest framework.Resource, resource *fra
 			return true
 		}
 	}
-
 	return false
 }
 
