@@ -178,6 +178,3 @@ func moreThanMin(used, min framework.Resource) bool {
 
 	return false
 }
-
-func resourceAdd(x, y int64) int64    { return x + y }
-func resourceDelete(x, y int64) int64 { return x - y }

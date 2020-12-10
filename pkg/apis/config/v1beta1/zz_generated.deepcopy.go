@@ -69,6 +69,16 @@ func (in *CoschedulingArgs) DeepCopyInto(out *CoschedulingArgs) {
 		*out = new(int64)
 		**out = **in
 	}
+	if in.KubeMaster != nil {
+		in, out := &in.KubeMaster, &out.KubeMaster
+		*out = new(string)
+		**out = **in
+	}
+	if in.KubeConfigPath != nil {
+		in, out := &in.KubeConfigPath, &out.KubeConfigPath
+		*out = new(string)
+		**out = **in
+	}
 	return
 }
 

@@ -25,10 +25,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -137,7 +135,7 @@ func BuildKubeConfigFile(config *restclient.Config) string {
 	return ""
 }
 
-func MakePods(podName string, namespace string, memReq int64, cpuReq int64, priority int32, uid string, nodeName string) *corev1.Pod {
+func MakePod(podName string, namespace string, memReq int64, cpuReq int64, priority int32, uid string, nodeName string) *corev1.Pod {
 	pause := imageutils.GetPauseImageName()
 	pod := st.MakePod().Namespace(namespace).Name(podName).Container(pause).
 		Priority(priority).Node(nodeName).UID(uid).ZeroTerminationGracePeriod().Obj()
@@ -148,31 +146,4 @@ func MakePods(podName string, namespace string, memReq int64, cpuReq int64, prio
 		},
 	}
 	return pod
-}
-
-// CleanupNamespace deletes the given ns and waits for them to be actually deleted.
-func CleanupNamespace(cs clientset.Interface, t *testing.T, nss []string) {
-	for _, ns := range nss {
-		err := cs.CoreV1().Namespaces().Delete(context.TODO(), ns, *metav1.NewDeleteOptions(0))
-		if err != nil && !apierrors.IsNotFound(err) {
-			t.Errorf("error while deleting ns %v: %v", ns, err)
-		}
-	}
-	for _, ns := range nss {
-		if err := wait.Poll(time.Millisecond, wait.ForeverTestTimeout,
-			NamespaceDeleted(cs, ns)); err != nil {
-			t.Errorf("error while waiting for ns %v to get deleted: %v", ns, err)
-		}
-	}
-}
-
-// NamespaceDeleted returns true if the namespace is not found.
-func NamespaceDeleted(cs clientset.Interface, namespace string) wait.ConditionFunc {
-	return func() (bool, error) {
-		_, err := cs.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-		return false, nil
-	}
 }

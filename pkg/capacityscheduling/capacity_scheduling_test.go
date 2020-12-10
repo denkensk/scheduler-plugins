@@ -20,13 +20,11 @@ import (
 	"context"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/events"
@@ -46,32 +44,7 @@ import (
 const ResourceGPU v1.ResourceName = "nvidia.com/gpu"
 
 var (
-	negPriority, lowPriority, midPriority, highPriority, veryHighPriority = int32(-100), int32(0), int32(100), int32(1000), int32(10000)
-
-	smallRes = map[v1.ResourceName]string{
-		v1.ResourceCPU:    "100m",
-		v1.ResourceMemory: "100",
-	}
-	mediumRes = map[v1.ResourceName]string{
-		v1.ResourceCPU:    "200m",
-		v1.ResourceMemory: "200",
-	}
-	largeRes = map[v1.ResourceName]string{
-		v1.ResourceCPU:    "300m",
-		v1.ResourceMemory: "300",
-	}
-	veryLargeRes = map[v1.ResourceName]string{
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
-	}
-
-	epochTime  = metav1.NewTime(time.Unix(0, 0))
-	epochTime1 = metav1.NewTime(time.Unix(0, 1))
-	epochTime2 = metav1.NewTime(time.Unix(0, 2))
-	epochTime3 = metav1.NewTime(time.Unix(0, 3))
-	epochTime4 = metav1.NewTime(time.Unix(0, 4))
-	epochTime5 = metav1.NewTime(time.Unix(0, 5))
-	epochTime6 = metav1.NewTime(time.Unix(0, 6))
+	midPriority, highPriority = int32(100), int32(1000)
 )
 
 func TestPreFilter(t *testing.T) {
@@ -88,7 +61,7 @@ func TestPreFilter(t *testing.T) {
 		expected      []framework.Code
 	}{
 		{
-			name: "pod belongs ElasticQuota",
+			name: "pod subjects to ElasticQuota",
 			podInfos: []podInfo{
 				{podName: "ns1-p1", podNamespace: "ns1", memReq: 500},
 				{podName: "ns1-p2", podNamespace: "ns1", memReq: 1800},
@@ -112,6 +85,41 @@ func TestPreFilter(t *testing.T) {
 				framework.Unschedulable,
 			},
 		},
+		{
+			name: "the sum of used is bigger than the sum of min",
+			podInfos: []podInfo{
+				{podName: "ns2-p1", podNamespace: "ns2", memReq: 500},
+			},
+			elasticQuotas: map[string]*ElasticQuotaInfo{
+				"ns1": {
+					Namespace: "ns2",
+					Min: &framework.Resource{
+						Memory: 1000,
+					},
+					Max: &framework.Resource{
+						Memory: 2000,
+					},
+					Used: &framework.Resource{
+						Memory: 1800,
+					},
+				},
+				"ns2": {
+					Namespace: "ns2",
+					Min: &framework.Resource{
+						Memory: 1000,
+					},
+					Max: &framework.Resource{
+						Memory: 2000,
+					},
+					Used: &framework.Resource{
+						Memory: 300,
+					},
+				},
+			},
+			expected: []framework.Code{
+				framework.Unschedulable,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,7 +129,7 @@ func TestPreFilter(t *testing.T) {
 
 			pods := make([]*v1.Pod, 0)
 			for _, podInfo := range tt.podInfos {
-				pod := makePods(podInfo.podName, podInfo.podNamespace, podInfo.memReq, 0, 0, 0, podInfo.podName, "")
+				pod := makePod(podInfo.podName, podInfo.podNamespace, podInfo.memReq, 0, 0, 0, podInfo.podName, "")
 				pods = append(pods, pod)
 			}
 
@@ -148,11 +156,11 @@ func TestFindCandidates(t *testing.T) {
 	}{
 		{
 			name: "in-namespace preemption",
-			pod:  makePods("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
+			pod:  makePod("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
 			pods: []*v1.Pod{
-				makePods("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
-				makePods("t1-p2", "ns2", 50, 0, 0, midPriority, "t1-p2", "node-a"),
-				makePods("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
+				makePod("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
+				makePod("t1-p2", "ns2", 50, 0, 0, midPriority, "t1-p2", "node-a"),
+				makePod("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
 			},
 			nodes: []*v1.Node{
 				st.MakeNode().Name("node-a").Capacity(res).Obj(),
@@ -190,7 +198,7 @@ func TestFindCandidates(t *testing.T) {
 				&candidate{
 					victims: &extenderv1.Victims{
 						Pods: []*v1.Pod{
-							makePods("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
+							makePod("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
 						},
 						NumPDBViolations: 0,
 					},
@@ -200,11 +208,11 @@ func TestFindCandidates(t *testing.T) {
 		},
 		{
 			name: "cross-namespace preemption",
-			pod:  makePods("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
+			pod:  makePod("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
 			pods: []*v1.Pod{
-				makePods("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
-				makePods("t1-p2", "ns2", 50, 0, 0, highPriority, "t1-p2", "node-a"),
-				makePods("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
+				makePod("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
+				makePod("t1-p2", "ns2", 50, 0, 0, highPriority, "t1-p2", "node-a"),
+				makePod("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
 			},
 			nodes: []*v1.Node{
 				st.MakeNode().Name("node-a").Capacity(res).Obj(),
@@ -242,7 +250,7 @@ func TestFindCandidates(t *testing.T) {
 				&candidate{
 					victims: &extenderv1.Victims{
 						Pods: []*v1.Pod{
-							makePods("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
+							makePod("t1-p3", "ns2", 50, 0, 0, midPriority, "t1-p3", "node-a"),
 						},
 						NumPDBViolations: 0,
 					},
@@ -311,7 +319,7 @@ func TestFindCandidates(t *testing.T) {
 	}
 }
 
-func makePods(podName string, namespace string, memReq int64, cpuReq int64, gpuReq int64, priority int32, uid string, nodeName string) *v1.Pod {
+func makePod(podName string, namespace string, memReq int64, cpuReq int64, gpuReq int64, priority int32, uid string, nodeName string) *v1.Pod {
 	pause := imageutils.GetPauseImageName()
 	pod := st.MakePod().Namespace(namespace).Name(podName).Container(pause).
 		Priority(priority).Node(nodeName).UID(uid).ZeroTerminationGracePeriod().Obj()
