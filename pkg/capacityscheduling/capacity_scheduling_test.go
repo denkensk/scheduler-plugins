@@ -147,7 +147,7 @@ func TestFindCandidates(t *testing.T) {
 		want          []dp.Candidate
 	}{
 		{
-			name: "intra namespace preempt",
+			name: "in-namespace preemption",
 			pod:  makePods("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
 			pods: []*v1.Pod{
 				makePods("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),
@@ -199,7 +199,7 @@ func TestFindCandidates(t *testing.T) {
 			},
 		},
 		{
-			name: "inter namespace preempt",
+			name: "cross-namespace preemption",
 			pod:  makePods("t1-p", "ns1", 50, 0, 0, highPriority, "", "t1-p"),
 			pods: []*v1.Pod{
 				makePods("t1-p1", "ns1", 50, 0, 0, midPriority, "t1-p1", "node-a"),

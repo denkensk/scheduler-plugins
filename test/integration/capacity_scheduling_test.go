@@ -185,7 +185,7 @@ func TestCapacityScheduling(t *testing.T) {
 		expectedPods  []*v1.Pod
 	}{
 		{
-			name:       "inter namespace preempt with quota",
+			name:       "cross-namespace preemption",
 			namespaces: []string{"ns1", "ns2"},
 			existPods: []*v1.Pod{
 				util.MakePods("t1-p1", "ns1", 50, 10, midPriority, "t1-p1", ""),
@@ -243,7 +243,7 @@ func TestCapacityScheduling(t *testing.T) {
 			},
 		},
 		{
-			name:       "intra namespace preempt with quota",
+			name:       "in-namespace preemption",
 			namespaces: []string{"ns1", "ns2"},
 			existPods: []*v1.Pod{
 				util.MakePods("t2-p1", "ns1", 50, 10, midPriority, "t2-p1", ""),
@@ -301,7 +301,7 @@ func TestCapacityScheduling(t *testing.T) {
 			},
 		},
 		{
-			name:       "intra namespace preempt without quota",
+			name:       "regular preemption without Elastic Quota",
 			namespaces: []string{"ns1", "ns2"},
 			existPods: []*v1.Pod{
 				util.MakePods("t3-p1", "ns1", 50, 10, highPriority, "t3-p1", ""),

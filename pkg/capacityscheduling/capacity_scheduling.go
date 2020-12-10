@@ -485,7 +485,7 @@ func selectVictimsOnNode(
 				// It means that its guaranteed isn't borrowed by other
 				// quotas. So that we will select the pods belongs to the
 				// same quota(namespace) with the lower priority than the
-				// preemptor’s priority as potential victims in a node.
+				// preemptor's priority as potential victims in a node.
 				if p.Pod.Namespace == pod.Namespace && podutil.GetPodPriority(p.Pod) < podPriority {
 					potentialVictims = append(potentialVictims, p.Pod)
 					if err := removePod(p.Pod); err != nil {
@@ -495,7 +495,7 @@ func selectVictimsOnNode(
 
 			} else {
 				// If Preemptor.Request + Quota.allocated <= Quota.min: It
-				// means that its min or guaranteed resource is used or
+				// means that its min(guaranteed) resource is used or
 				// `borrowed` by other Quota. Potential victims in a node
 				// will be chosen from Quotas that allocates more resources
 				// than its min, i.e., borrowing resources from other
